@@ -31,6 +31,19 @@ import {
   ResponsiveContainer
 } from 'recharts';
 
+const EMPTY_PLAN = [
+  "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"
+].map(dia => ({
+  dia,
+  refeicoes: {
+    cafe_da_manha: ["", "", "", "", ""],
+    lanche_da_manha: ["", "", "", "", ""],
+    almoco: ["", "", "", "", ""],
+    lanche_da_tarde: ["", "", "", "", ""],
+    jantar: ["", "", "", "", ""]
+  }
+}));
+
 const PatientProfile = () => {
   const { id } = useParams();
   const [patient, setPatient] = useState(null);
@@ -40,9 +53,10 @@ const PatientProfile = () => {
   const [saveLoading, setSaveLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   
-  // AI States
-  const [isGenerating, setIsGenerating] = useState(false);
+  // Meal Plan States
+  const [editingPlanId, setEditingPlanId] = useState(null);
   const [generatedPlan, setGeneratedPlan] = useState(null);
+  const [isGenerating, setIsGenerating] = useState(false);
   
   // Tabs State
   const [mainTab, setMainTab] = useState('dados'); // 'dados', 'consultas', 'planos'
@@ -160,10 +174,16 @@ const PatientProfile = () => {
     }
   };
 
+  const handleNewPlan = () => {
+    setGeneratedPlan(EMPTY_PLAN);
+    setEditingPlanId(null);
+  };
+
   const handleGeneratePlan = async () => {
     if (!patient) return;
     setIsGenerating(true);
     setGeneratedPlan(null);
+    setEditingPlanId(null);
     
     try {
       const { data, error } = await supabase.functions.invoke('gerar-plano', {
@@ -190,16 +210,30 @@ const PatientProfile = () => {
     if (!generatedPlan) return;
     setSaveLoading(true);
     try {
-      const { error } = await supabase
-        .from('planos_alimentares')
-        .insert([{
-          paciente_id: id,
-          conteudo: { plano_semanal: generatedPlan }
-        }]);
+      if (editingPlanId) {
+        const { error } = await supabase
+          .from('planos_alimentares')
+          .update({
+            conteudo: { plano_semanal: generatedPlan }
+          })
+          .eq('id', editingPlanId);
+        
+        if (error) throw error;
+        setSuccessMsg('Plano alimentar atualizado com sucesso!');
+      } else {
+        const { error } = await supabase
+          .from('planos_alimentares')
+          .insert([{
+            paciente_id: id,
+            conteudo: { plano_semanal: generatedPlan }
+          }]);
 
-      if (error) throw error;
-      setSuccessMsg('Plano alimentar salvo com sucesso!');
+        if (error) throw error;
+        setSuccessMsg('Plano alimentar salvo com sucesso!');
+      }
+      
       setGeneratedPlan(null);
+      setEditingPlanId(null);
       fetchMealPlans();
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (error) {
@@ -302,16 +336,28 @@ const PatientProfile = () => {
           )}
           {mainTab === 'planos' && (
             <div style={{ display: 'flex', gap: '1rem' }}>
-              {generatedPlan && (
-                <button onClick={handleSavePlan} disabled={saveLoading} className="btn-primary" style={{ width: 'auto', padding: '0 1.5rem', backgroundColor: '#10b981' }}>
-                  <Save size={18} style={{ marginRight: '0.5rem' }} />
-                  Salvar Plano
-                </button>
+              {generatedPlan ? (
+                <>
+                  <button onClick={() => { setGeneratedPlan(null); setEditingPlanId(null); }} className="btn-logout" style={{ width: 'auto', padding: '0 1.5rem', backgroundColor: 'var(--white)', border: '1px solid var(--border-light)' }}>
+                    Cancelar
+                  </button>
+                  <button onClick={handleSavePlan} disabled={saveLoading} className="btn-primary" style={{ width: 'auto', padding: '0 1.5rem', backgroundColor: '#10b981' }}>
+                    <Save size={18} style={{ marginRight: '0.5rem' }} />
+                    {saveLoading ? 'Salvando...' : (editingPlanId ? 'Atualizar Plano' : 'Salvar Plano')}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button onClick={handleNewPlan} className="btn-primary" style={{ width: 'auto', padding: '0 1.5rem', backgroundColor: 'var(--white)', border: '1px solid var(--border-light)', color: 'var(--text-main)' }}>
+                    <Plus size={18} style={{ marginRight: '0.5rem' }} />
+                    Plano Manual
+                  </button>
+                  <button onClick={handleGeneratePlan} disabled={isGenerating} className="btn-primary" style={{ width: 'auto', padding: '0 1.5rem', background: 'linear-gradient(135deg, var(--primary) 0%, #6366f1 100%)' }}>
+                    <Activity size={18} style={{ marginRight: '0.5rem' }} className={isGenerating ? 'animate-spin' : ''} />
+                    {isGenerating ? 'Gerando...' : 'Gerar com IA'}
+                  </button>
+                </>
               )}
-              <button onClick={handleGeneratePlan} disabled={isGenerating} className="btn-primary" style={{ width: 'auto', padding: '0 1.5rem', background: 'linear-gradient(135deg, var(--primary) 0%, #6366f1 100%)' }}>
-                <Activity size={18} style={{ marginRight: '0.5rem' }} className={isGenerating ? 'animate-spin' : ''} />
-                {isGenerating ? 'Gerando...' : 'Gerar com IA'}
-              </button>
             </div>
           )}
         </div>
@@ -489,19 +535,36 @@ const PatientProfile = () => {
           {generatedPlan && !isGenerating && (
             <div className="meal-plan-editor">
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', alignItems: 'center' }}>
-                <h3 style={{ fontWeight: 800 }}>📝 Editor de Plano</h3>
-                <button className="btn-logout" style={{ width: 'auto' }} onClick={() => setGeneratedPlan(null)}>Cancelar</button>
+                <h3 style={{ fontWeight: 800 }}>
+                  {editingPlanId ? '✏️ Editando Plano Alimentar' : '📝 Novo Plano Alimentar'}
+                </h3>
               </div>
               {generatedPlan.map((dia, dIdx) => (
                 <div key={dia.dia} className="card" style={{ marginBottom: '1.5rem', padding: '1.5rem' }}>
                   <h4 style={{ color: 'var(--primary)', marginBottom: '1.5rem', fontWeight: 800 }}>📅 {dia.dia}</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
                     {Object.entries(dia.refeicoes).map(([mealKey, options]) => (
                       <div key={mealKey} className="meal-card" style={{ background: 'var(--bg-app)', padding: '1rem', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
-                        <p style={{ fontWeight: 700, marginBottom: '0.75rem', textTransform: 'capitalize' }}>{mealKey.replace(/_/g, ' ')}</p>
-                        {options.map((opt, oIdx) => (
-                          <input key={oIdx} className="input-field" style={{ marginBottom: '0.4rem', fontSize: '0.85rem', backgroundColor: 'var(--white)' }} value={opt} onChange={(e) => handleEditMealOption(dIdx, mealKey, oIdx, e.target.value)} />
-                        ))}
+                        <p style={{ fontWeight: 700, marginBottom: '0.75rem', textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          {mealKey === 'cafe_da_manha' && '☀️'}
+                          {mealKey === 'lanche_da_manha' && '🍎'}
+                          {mealKey === 'almoco' && '🍲'}
+                          {mealKey === 'lanche_da_tarde' && '🥨'}
+                          {mealKey === 'jantar' && '🥗'}
+                          {mealKey.replace(/_/g, ' ')}
+                        </p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {options.map((opt, oIdx) => (
+                            <input 
+                              key={oIdx} 
+                              className="input-field" 
+                              style={{ fontSize: '0.85rem', backgroundColor: 'var(--white)' }} 
+                              placeholder={`Opção ${oIdx + 1}`}
+                              value={opt} 
+                              onChange={(e) => handleEditMealOption(dIdx, mealKey, oIdx, e.target.value)} 
+                            />
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -510,19 +573,38 @@ const PatientProfile = () => {
             </div>
           )}
 
-          {!generatedPlan && !isGenerating && (
+          {!generatedPlan && (
             <div className="list-card">
-              <div className="list-header"><h3 className="list-title">Histórico de Planos</h3></div>
+              <div className="list-header">
+                <h3 className="list-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <History size={20} /> Histórico de Planos
+                </h3>
+              </div>
               <div className="list-content">
-                {mealPlans.map(plan => (
-                  <div key={plan.id} className="list-item" style={{ cursor: 'pointer' }} onClick={() => setGeneratedPlan(plan.conteudo.plano_semanal)}>
+                {mealPlans.length > 0 ? mealPlans.map(plan => (
+                  <div 
+                    key={plan.id} 
+                    className="list-item" 
+                    style={{ cursor: 'pointer' }} 
+                    onClick={() => {
+                      setGeneratedPlan(plan.conteudo.plano_semanal);
+                      setEditingPlanId(plan.id);
+                    }}
+                  >
                     <div className="user-info">
                       <div className="icon-box green"><FileText size={18} /></div>
-                      <div><span className="user-name">Plano de {new Date(plan.created_at).toLocaleDateString()}</span></div>
+                      <div>
+                        <span className="user-name">Plano de {new Date(plan.created_at).toLocaleDateString('pt-BR')}</span>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Clique para editar este plano</p>
+                      </div>
                     </div>
-                    <button className="btn-icon" style={{ color: 'var(--primary)', fontWeight: 700 }}>Visualizar</button>
+                    <button className="btn-icon" style={{ color: 'var(--primary)', fontWeight: 700 }}>Editar</button>
                   </div>
-                ))}
+                )) : (
+                  <div className="empty-state" style={{ padding: '3rem' }}>
+                    Nenhum plano alimentar cadastrado para este paciente.
+                  </div>
+                )}
               </div>
             </div>
           )}
